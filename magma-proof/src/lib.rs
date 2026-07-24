@@ -50,10 +50,25 @@ pub fn prove<F: Field, const D: usize, const B: usize>(
     }
 }
 
-pub fn verify<F: Field, const D: usize>(
+pub fn verify<F: Field, const D: usize, const B: usize>(
     ops: &[Op],
-    delta: &[[F; 64]],
-    q: &[[F; 64]],
+    buf: &[Cell<Entry<F>>; B],
+    q_stor: &mut F,
 ) -> impl Iterator<Item = ChallengeToken> {
-    gen move { for op in ops {} }
+    gen move {
+        let mut i = 0;
+        macro_rules! resp {
+            () => {
+                yield ChallengeToken;
+                let Entry(scale, q, delta) = buf[i].take();
+                *q_stor = q_stor.clone() + scale * q.clone();
+                i += 1;
+                if i == B {
+                    i = 0;
+                }
+                q
+            };
+        }
+        for op in ops {}
+    }
 }
