@@ -1,24 +1,34 @@
 #![no_std]
 #![feature(gen_blocks)]
-
+extern crate alloc;
 use core::{
     array,
     cell::Cell,
     ops::{Add, Mul},
 };
 
+use alloc::vec::Vec;
+
 use crate::math::{Field, Poly};
 pub mod math;
-pub enum Op {}
+pub enum Op<F> {
+    MatMul { num_pops: usize, elems: Vec<F> },
+}
 pub enum EwType {}
 pub struct ChallengeToken;
-pub fn extended_witness_slots(a: &[Op]) -> impl Iterator<Item = EwType> {
-    gen move { for op in a {} }
+pub fn extended_witness_slots<F: Field>(a: &[Op<F>]) -> impl Iterator<Item = EwType> {
+    gen move {
+        for op in a {
+            match op {
+                Op::MatMul { num_pops, elems } => {}
+            }
+        }
+    }
 }
 #[derive(Clone, Copy, Default)]
 pub struct Entry<F>(F, F, F);
 pub fn prove<F: Field, const D: usize, const B: usize>(
-    ops: &[Op],
+    ops: &[Op<F>],
     buf: &[Cell<Entry<F>>; B],
     poly: &mut Poly<F, D>,
 ) -> impl Iterator<Item = (F,)> {
@@ -46,12 +56,31 @@ pub fn prove<F: Field, const D: usize, const B: usize>(
                 }
             };
         }
-        for op in ops {}
+        let mut stack: Vec<Poly<F, D>> = Vec::new();
+        for op in ops {
+            match op {
+                Op::MatMul { num_pops, elems } => {
+                    let mut pops = (0..*num_pops)
+                        .filter_map(|a| stack.pop())
+                        .collect::<Vec<_>>();
+                    pops.reverse();
+                    for c in elems.chunks_exact(*num_pops) {
+                        stack.push(
+                            c.iter()
+                                .zip(pops.iter())
+                                .fold(Default::default(), |a, (b, c)| {
+                                    a + (c.clone().scale(b.clone()))
+                                }),
+                        );
+                    }
+                }
+            }
+        }
     }
 }
 
 pub fn verify<F: Field, const D: usize, const B: usize>(
-    ops: &[Op],
+    ops: &[Op<F>],
     buf: &[Cell<Entry<F>>; B],
     q_stor: &mut F,
 ) -> impl Iterator<Item = ChallengeToken> {
@@ -69,6 +98,23 @@ pub fn verify<F: Field, const D: usize, const B: usize>(
                 q
             };
         }
-        for op in ops {}
+        let mut stack: Vec<F> = Vec::new();
+        for op in ops {
+            match op {
+                Op::MatMul { num_pops, elems } => {
+                    let mut pops = (0..*num_pops)
+                        .filter_map(|a| stack.pop())
+                        .collect::<Vec<_>>();
+                    pops.reverse();
+                    for c in elems.chunks_exact(*num_pops) {
+                        stack.push(
+                            c.iter()
+                                .zip(pops.iter())
+                                .fold(Default::default(), |a, (b, c)| a + (b.clone() * c.clone())),
+                        );
+                    }
+                }
+            }
+        }
     }
 }

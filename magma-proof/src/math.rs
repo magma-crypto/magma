@@ -1,4 +1,7 @@
-use core::{array, ops::{Add, Mul, Sub}};
+use core::{
+    array,
+    ops::{Add, Mul, Sub},
+};
 
 pub trait Field:
     Default + Add<Self, Output = Self> + Mul<Self, Output = Self> + Clone + From<bool>
@@ -7,6 +10,11 @@ pub trait Field:
 impl<F: Default + Add<F, Output = F> + Mul<F, Output = F> + Clone + From<bool>> Field for F {}
 #[derive(Clone, Copy)]
 pub struct Poly<T, const D: usize>(pub [T; D], pub usize);
+impl<T: Default,const D: usize> Default for Poly<T,D>{
+    fn default() -> Self {
+        Self(array::from_fn(|_|Default::default()), Default::default())
+    }
+}
 impl<T: Default, const D: usize> Poly<T, D> {
     pub fn constant(v: T) -> Self {
         let mut a: [T; D] = array::from_fn(|_| T::default());
