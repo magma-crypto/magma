@@ -1,5 +1,5 @@
 [workspace]
-members = ["magma-proof"]
+members = ["magma-proof", "magma-vole"]
 resolver = "3"
 
 [workspace.dependencies]
