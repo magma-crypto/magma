@@ -4,117 +4,131 @@ extern crate alloc;
 use core::{
     array,
     cell::Cell,
+    marker::PhantomData,
+    mem::take,
     ops::{Add, Mul},
+    sync::atomic::AtomicUsize,
+    task::{Poll, Waker},
 };
 
 use alloc::vec::Vec;
+use atomic_waker::AtomicWaker;
 
 use crate::math::{Field, Poly};
 pub mod math;
-pub enum Op<F> {
-    MatMul { num_pops: usize, elems: Vec<F> },
-}
-pub enum EwType {}
-pub struct ChallengeToken;
-pub fn extended_witness_slots<F: Field>(a: &[Op<F>]) -> impl Iterator<Item = EwType> {
-    gen move {
-        for op in a {
-            match op {
-                Op::MatMul { num_pops, elems } => {}
-            }
-        }
-    }
+pub trait Transport<F: Field> {
+    type Wrap;
+    async fn add(&self, wa: &Self::Wrap, wb: &Self::Wrap) -> Self::Wrap;
+    async fn mul(&self, wa: &Self::Wrap, wb: &Self::Wrap) -> Self::Wrap;
+    async fn scale(&self, wa: &Self::Wrap, b: F) -> Self::Wrap;
+    async fn wrap(&self, a: F) -> Self::Wrap;
 }
 #[derive(Clone, Copy, Default)]
-pub struct Entry<F>(F, F, F);
-pub fn prove<F: Field, const D: usize, const B: usize>(
-    ops: &[Op<F>],
-    buf: &[Cell<Entry<F>>; B],
-    poly: &mut Poly<F, D>,
-) -> impl Iterator<Item = (F,)> {
-    gen move {
-        let mut i = 0;
-        macro_rules! challenge {
-            ($p:expr) => {
-                match $p {
-                    poly2 => {
-                        let val = poly2.0[poly2.1 - 1].clone();
-                        yield val.clone();
-                        let Entry(scale, u,v) = buf[i].take();
-                        poly2.0[poly2.1 - 1] = val.clone() + u;
-                        *poly = poly.clone() + poly2.clone().scale(scale);
-                        i += 1;
-                        if i == B {
-                            i = 0;
-                        }
-                        let mut arr: [F; D] = array::from_fn(|-|F::default());
-                        arr[0] = v;
-                        arr[1] = val;
-                        let p = Poly(arr, 2);
-                        p
-                    }
-                }
-            };
+pub struct Entry<F>(F, F);
+pub struct Prover<'a, F: Field, const B: usize, const N: usize>(
+    &'a [(
+        Cell<Option<Entry<F>>>,
+        Cell<Poly<F, N>>,
+        AtomicWaker,
+        AtomicWaker,
+    ); B],
+    AtomicUsize,
+);
+pub struct Verifier<'a, F: Field, const B: usize, const N: usize>(
+    &'a [(Cell<Option<Entry<F>>>, Cell<F>, AtomicWaker, AtomicWaker); B],
+    AtomicUsize,
+);
+impl<'a, F: Field, const B: usize, const N: usize> Transport<F> for Verifier<'a, F, B, N> {
+    type Wrap = (F, usize);
+
+    async fn add(&self, wa: &Self::Wrap, wb: &Self::Wrap) -> Self::Wrap {
+        (wa.0.clone() + wb.0.clone(), wa.1.max(wb.1))
+    }
+
+    async fn mul(&self, wa: &Self::Wrap, wb: &Self::Wrap) -> Self::Wrap {
+        if wa.1 + wb.1 < N {
+            return (wa.0.clone() * wb.0.clone(), wa.1 + wb.1);
         }
-        let mut stack: Vec<Poly<F, D>> = Vec::new();
-        for op in ops {
-            match op {
-                Op::MatMul { num_pops, elems } => {
-                    let mut pops = (0..*num_pops)
-                        .filter_map(|a| stack.pop())
-                        .collect::<Vec<_>>();
-                    pops.reverse();
-                    for c in elems.chunks_exact(*num_pops) {
-                        stack.push(
-                            c.iter()
-                                .zip(pops.iter())
-                                .fold(Default::default(), |a, (b, c)| {
-                                    a + (c.clone().scale(b.clone()))
-                                }),
-                        );
+        let mut wa = wa.clone();
+        let mut wb = wb.clone();
+        for i in 0..=1 {
+            let p = if i == 0usize { &mut wa } else { &mut wb };
+            let i = self.1.fetch_add(1, core::sync::atomic::Ordering::SeqCst) % B;
+            let Entry(q, delta) = core::future::poll_fn(|cx| match &self.0[i] {
+                (a, _, b, _) => match a.take() {
+                    Some(a) => Poll::Ready(a),
+                    None => {
+                        b.register(cx.waker());
+                        Poll::Pending
                     }
-                }
+                },
+            })
+            .await;
+            p.0 = q;
+            p.1 = 2;
+            if wa.1 + wb.1 < N {
+                return (wa.0.clone() * wb.0.clone(), wa.1 + wb.1);
             }
         }
+        unreachable!()
+    }
+
+    async fn scale(&self, wa: &Self::Wrap, b: F) -> Self::Wrap {
+        (wa.0.clone() * b, wa.1)
+    }
+
+    async fn wrap(&self, a: F) -> Self::Wrap {
+        (a, 1)
     }
 }
+impl<'a, F: Field, const B: usize, const N: usize> Transport<F> for Prover<'a, F, B, N> {
+    type Wrap = Poly<F, N>;
 
-pub fn verify<F: Field, const D: usize, const B: usize>(
-    ops: &[Op<F>],
-    buf: &[Cell<Entry<F>>; B],
-    q_stor: &mut F,
-) -> impl Iterator<Item = ChallengeToken> {
-    gen move {
-        let mut i = 0;
-        macro_rules! resp {
-            () => {
-                yield ChallengeToken;
-                let Entry(scale, q, delta) = buf[i].take();
-                *q_stor = q_stor.clone() + scale * q.clone();
-                i += 1;
-                if i == B {
-                    i = 0;
-                }
-                q
-            };
+    async fn add(&self, wa: &Self::Wrap, wb: &Self::Wrap) -> Self::Wrap {
+        wa.clone() + wb.clone()
+    }
+
+    async fn mul(&self, wa: &Self::Wrap, wb: &Self::Wrap) -> Self::Wrap {
+        if wa.1 + wb.1 < N {
+            return wa.clone() * wb.clone();
         }
-        let mut stack: Vec<F> = Vec::new();
-        for op in ops {
-            match op {
-                Op::MatMul { num_pops, elems } => {
-                    let mut pops = (0..*num_pops)
-                        .filter_map(|a| stack.pop())
-                        .collect::<Vec<_>>();
-                    pops.reverse();
-                    for c in elems.chunks_exact(*num_pops) {
-                        stack.push(
-                            c.iter()
-                                .zip(pops.iter())
-                                .fold(Default::default(), |a, (b, c)| a + (b.clone() * c.clone())),
-                        );
+        let mut wa = wa.clone();
+        let mut wb = wb.clone();
+        for i in 0..=1 {
+            let p = if i == 0usize { &mut wa } else { &mut wb };
+            let i = self.1.fetch_add(1, core::sync::atomic::Ordering::SeqCst) % B;
+            let Entry(u, v) = core::future::poll_fn(|cx| match &self.0[i] {
+                (a, _, b, _) => match a.take() {
+                    Some(a) => Poll::Ready(a),
+                    None => {
+                        b.register(cx.waker());
+                        Poll::Pending
                     }
-                }
+                },
+            })
+            .await;
+            let val = p.0[p.1 - 1].clone();
+            p.0[p.1 - 1] = val.clone() + u;
+            self.0[i].1.replace(take(&mut *p));
+            self.0[i].3.wake();
+            p.0[0] = v;
+            p.0[1] = val;
+            p.1 = 2;
+            if wa.1 + wb.1 < N {
+                return wa.clone() * wb.clone();
             }
         }
+        unreachable!()
+    }
+
+    async fn scale(&self, wa: &Self::Wrap, b: F) -> Self::Wrap {
+        wa.clone().scale(b)
+    }
+
+    async fn wrap(&self, a: F) -> Self::Wrap {
+        let mut arr: [F; N] = array::from_fn(|_| F::default());
+        arr[0] = a;
+        let p = Poly(arr, 1);
+        p
     }
 }
