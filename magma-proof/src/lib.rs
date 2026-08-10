@@ -19,3 +19,23 @@ pub trait Transport<F: Field> {
     async fn scale(&self, wa: &Self::Wrap, b: F) -> Self::Wrap;
     async fn wrap(&self, a: F) -> Self::Wrap;
 }
+pub struct Executor;
+impl<F: Field> Transport<F> for Executor {
+    type Wrap = F;
+
+    async fn add(&self, wa: &Self::Wrap, wb: &Self::Wrap) -> Self::Wrap {
+        wa.clone() + wb.clone()
+    }
+
+    async fn mul(&self, wa: &Self::Wrap, wb: &Self::Wrap) -> Self::Wrap {
+        wa.clone() * wb.clone()
+    }
+
+    async fn scale(&self, wa: &Self::Wrap, b: F) -> Self::Wrap {
+        wa.clone() * b
+    }
+
+    async fn wrap(&self, a: F) -> Self::Wrap {
+        a
+    }
+}
