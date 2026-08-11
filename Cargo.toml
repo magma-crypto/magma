@@ -3,3 +3,13 @@ members = ["magma-codegen","magma-proof", "magma-vole"]
 resolver = "3"
 
 [workspace.dependencies]
+ark-crypto-primitives = { version = "0.6.0", default-features = false }
+ark-ec = { version = "0.6.0", default-features = false }
+ark-ff = { version = "0.6.0", default-features = false }
+ark-groth16 = { version = "0.6.0", default-features = false }
+ark-poly = { version = "0.6.0", default-features = false }
+ark-r1cs-std = { version = "0.6.0", default-features = false }
+ark-relations = { version = "0.6.0", default-features = false }
+ark-serialize = { version = "0.6.0", default-features = false }
+ark-snark = { version = "0.6.0", default-features = false }
+ark-std = { version = "0.6.0", default-features = false }
