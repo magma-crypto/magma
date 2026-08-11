@@ -8,6 +8,7 @@ struct State {
     current_pubkey: [u8; 32],
     miner: [u8; 32],
     current_subcommand: u32,
+    regs: [[u8; 32]; 256],
 }
 struct Opening {
     hashes: [[u8; 32]; 256],
@@ -85,13 +86,7 @@ fn main(
     mut new_hash: [u8; 32 * 512],
 ) -> pub State {
     assert(sha256::digest(current_sig_opening) == root.current_sig);
-    let mut is_eob: bool = true;
-    for i in 0..32 {
-        if root.command_root[i] != 0 {
-            is_eob = false
-        }
-    }
-    if is_eob {
+    if root.command_root == [0u8; 32] {
         let hash = verify_lms(xarg, current_sig_opening);
         if hash == root.current_pubkey {
             root.command_root = xarg;
@@ -145,12 +140,19 @@ fn main(
                     root.current_sig = xarg2;
                     root.state_root = tag_opening.patch(key, depad(cur));
                     root.current_subcommand = 0x101;
+                    root.regs = [[0u8; 32]; 256];
                 } else if root.current_subcommand == 0x101 {
                     let amount: U256 = U256::from_le_bytes(pad(arg));
                     let mut nip = U256::from_le_bytes(pad(root.current_sig)) + U256::one();
                     tag_opening.open(root.command_root, root.current_sig, tag);
-
-                    root.current_sig = depad(nip.to_le_bytes());
+                    let opcode = tag[0];
+                    if opcode == 0 {
+                        root.current_sig = root.regs[tag[1] as u32];
+                        root.current_subcommand += 1;
+                        root.regs = [[0u8; 32]; 256];
+                    } else {
+                        root.current_sig = depad(nip.to_le_bytes());
+                    }
                 }
             }
         }
