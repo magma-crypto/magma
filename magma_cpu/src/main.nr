@@ -1,3 +1,4 @@
+use bignum::{bignum::BigNum, fields::U256::U256};
 use std::runtime;
 
 struct State {
@@ -54,6 +55,20 @@ fn verify_lms(msg: [u8; 32], mut sig: [u8; 32 * 512]) -> [u8; 32] {
     let hash = sha256::digest(sig);
     hash
 }
+fn pad(a: [u8; 32]) -> [u8; 33] {
+    let mut b = [0u8; 33];
+    for i in 0..32 {
+        b[i] = a[i]
+    }
+    b
+}
+fn depad(a: [u8; 33]) -> [u8; 32] {
+    let mut b = [0u8; 32];
+    for i in 0..32 {
+        b[i] = a[i]
+    }
+    b
+}
 fn main(
     mut root: pub State,
     kind_opening: Opening,
@@ -64,6 +79,8 @@ fn main(
     xarg: [u8; 32],
     xarg2: [u8; 32],
     arg_ptr_opening1: Opening,
+    tag_opening: Opening,
+    tag: [u8; 32],
     current_sig_opening: [u8; 32 * 512],
     mut new_hash: [u8; 32 * 512],
 ) -> pub State {
@@ -109,6 +126,33 @@ fn main(
             } else {
                 arg_ptr_opening1.open(root.command_root, root.current_pubkey, kind);
                 xarg_opening.open(root.command_root, kind, xarg);
+                if root.current_subcommand == 1 {
+                    let amount: U256 = U256::from_le_bytes(pad(arg));
+                    let mut key = [0u8; 65];
+                    key[0] = 0;
+                    for i in 0..32 {
+                        key[i + 1] = xarg[i]
+                    }
+                    for i in 0..32 {
+                        key[i + 33] = xarg2[i]
+                    }
+                    let key = sha256::digest(key);
+                    tag_opening.open(root.state_root, key, tag);
+                    let cur: U256 = U256::from_le_bytes(pad(tag));
+                    assert(cur >= amount);
+                    let cur = cur - amount;
+                    let cur = cur.to_le_bytes();
+                    root.current_sig = xarg2;
+                    root.state_root = tag_opening.patch(key, depad(cur));
+                    root.current_subcommand = 0x101;
+                } else if root.current_subcommand == 0x101 {
+                    let amount: U256 = U256::from_le_bytes(pad(arg));
+                    assert(root.current_sig == xarg2);
+                    let mut nip = U256::from_le_bytes(pad(xarg2)) + U256::one();
+                    tag_opening.open(root.command_root, xarg2, tag);
+                    
+                    root.current_sig = depad(nip.to_le_bytes());
+                }
             }
         }
         root
