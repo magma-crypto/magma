@@ -15,20 +15,21 @@ pub struct Prover<'a, F: Field, const B: usize, const N: usize>(
     ); B],
     AtomicUsize,
 );
-pub struct Verifier<'a, F: Field, const B: usize, const N: usize>(
-    &'a [(Cell<Option<Entry<F>>>, Cell<F>, AtomicWaker, AtomicWaker); B],
+pub struct Verifier<'a, F: Field, const B: usize, const N: usize,T: Transport<F>>(
+    &'a [(Cell<Option<Entry<T::Wrap>>>, Cell<T::Wrap>, AtomicWaker, AtomicWaker); B],
     AtomicUsize,
+    T,
 );
-impl<'a, F: Field, const B: usize, const N: usize> Transport<F> for Verifier<'a, F, B, N> {
-    type Wrap = (F, usize);
+impl<'a, F: Field, const B: usize, const N: usize,T: Transport<F,Wrap: Clone>> Transport<F> for Verifier<'a, F, B, N,T> {
+    type Wrap = (T::Wrap, usize);
 
     async fn add(&self, wa: &Self::Wrap, wb: &Self::Wrap) -> Self::Wrap {
-        (wa.0.clone() + wb.0.clone(), wa.1.max(wb.1))
+        (self.2.add(&wa.0,&wb.0).await, wa.1.max(wb.1))
     }
 
     async fn mul(&self, wa: &Self::Wrap, wb: &Self::Wrap) -> Self::Wrap {
         if wa.1 + wb.1 < N {
-            return (wa.0.clone() * wb.0.clone(), wa.1 + wb.1);
+            return (self.2.mul(&wa.0, &wb.0).await, wa.1 + wb.1);
         }
         let mut wa = wa.clone();
         let mut wb = wb.clone();
@@ -48,18 +49,18 @@ impl<'a, F: Field, const B: usize, const N: usize> Transport<F> for Verifier<'a,
             p.0 = q;
             p.1 = 2;
             if wa.1 + wb.1 < N {
-                return (wa.0.clone() * wb.0.clone(), wa.1 + wb.1);
+                return (self.2.mul(&wa.0, &wb.0).await, wa.1 + wb.1);
             }
         }
         unreachable!()
     }
 
     async fn scale(&self, wa: &Self::Wrap, b: F) -> Self::Wrap {
-        (wa.0.clone() * b, wa.1)
+        (self.2.scale(&wa.0, b).await, wa.1)
     }
 
     async fn wrap(&self, a: F) -> Self::Wrap {
-        (a, 1)
+        (self.2.wrap(a).await, 1)
     }
 }
 impl<'a, F: Field, const B: usize, const N: usize> Transport<F> for Prover<'a, F, B, N> {
