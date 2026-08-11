@@ -147,10 +147,9 @@ fn main(
                     root.current_subcommand = 0x101;
                 } else if root.current_subcommand == 0x101 {
                     let amount: U256 = U256::from_le_bytes(pad(arg));
-                    assert(root.current_sig == xarg2);
-                    let mut nip = U256::from_le_bytes(pad(xarg2)) + U256::one();
-                    tag_opening.open(root.command_root, xarg2, tag);
-                    
+                    let mut nip = U256::from_le_bytes(pad(root.current_sig)) + U256::one();
+                    tag_opening.open(root.command_root, root.current_sig, tag);
+
                     root.current_sig = depad(nip.to_le_bytes());
                 }
             }
