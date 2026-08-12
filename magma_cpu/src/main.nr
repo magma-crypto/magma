@@ -3,6 +3,7 @@ use std::runtime;
 
 struct State {
     state_root: [u8; 32],
+    state_patch: Patch,
     command_root: [u8; 32],
     current_sig: [u8; 32],
     current_pubkey: [u8; 32],
@@ -12,6 +13,16 @@ struct State {
 }
 struct Opening {
     hashes: [[u8; 32]; 256],
+}
+struct Patch{
+    path: [u8; 32],
+    node: [u8; 32]
+}
+impl Patch{
+    fn clear(self: &mut Self){
+        self.path = [0u8; 32];
+        self.node = [0u8; 32];
+    }
 }
 impl Opening {
     fn patch(self: Self, path: [u8; 32], mut node: [u8; 32]) -> [u8; 32] {
@@ -86,6 +97,7 @@ fn main(
     mut new_hash: [u8; 32 * 512],
 ) -> pub State {
     assert(sha256::digest(current_sig_opening) == root.current_sig);
+    root.state_patch.clear();
     if root.command_root == [0u8; 32] {
         let hash = verify_lms(xarg, current_sig_opening);
         if hash == root.current_pubkey {
@@ -139,6 +151,8 @@ fn main(
                     let cur = cur.to_le_bytes();
                     root.current_sig = xarg2;
                     root.state_root = tag_opening.patch(key, depad(cur));
+                    root.state_patch.path = key;
+                    root.state_patch.node = depad(cur);
                     root.current_subcommand = 0x101;
                     root.regs = [[0u8; 32]; 256];
                 } else if root.current_subcommand == 0x101 {
