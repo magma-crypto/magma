@@ -93,12 +93,13 @@ fn main(
     arg_ptr_opening1: Opening,
     tag_opening: Opening,
     tag: [u8; 32],
+    misc_opening: Opening,
     current_sig_opening: [u8; 32 * 512],
     mut new_hash: [u8; 32 * 512],
 ) -> pub State {
-    assert(sha256::digest(current_sig_opening) == root.current_sig);
     root.state_patch.clear();
     if root.command_root == [0u8; 32] {
+        assert(sha256::digest(current_sig_opening) == root.current_sig);
         let hash = verify_lms(xarg, current_sig_opening);
         if hash == root.current_pubkey {
             root.command_root = xarg;
@@ -155,18 +156,31 @@ fn main(
                     root.state_patch.node = depad(cur);
                     root.current_subcommand = 0x101;
                     root.regs = [[0u8; 32]; 256];
-                } else if root.current_subcommand == 0x101 {
+                } else if (root.current_subcommand == 0x101) | (root.current_subcommand == 0x103){
                     let amount: U256 = U256::from_le_bytes(pad(arg));
                     let mut nip = U256::from_le_bytes(pad(root.current_sig)) + U256::one();
                     tag_opening.open(root.command_root, root.current_sig, tag);
+                    if root.current_subcommand == 0x103{
+                        misc_opening.open(root.state_root, sha256::digest(pad(root.current_sig)), tag);
+                    }
                     let opcode = tag[0];
                     if opcode == 0 {
                         root.current_sig = root.regs[tag[1] as u32];
                         root.current_subcommand += 1;
                         root.regs = [[0u8; 32]; 256];
                     } else {
+                        if opcode == 1{
+                            let dest = tag[1];
+                            let src1 = tag[2];
+                            let src2 = tag[3];
+                            for i in 0..32{
+                                root.regs[dest as u32][i] = root.regs[src1 as u32][i] ^ root.regs[src2 as u32][i]
+                            }
+                        }
                         root.current_sig = depad(nip.to_le_bytes());
                     }
+                } else if(root.current_subcommand == 0x102) | (root.current_subcommand == 0x104){
+
                 }
             }
         }
